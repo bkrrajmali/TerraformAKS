@@ -1,0 +1,46 @@
+name: 'Terraform Init'
+description: 'Installs Terraform and runs terraform init against the Azure backend using a service principal JSON credential'
+
+inputs:
+  terraform-version:
+    description: 'Terraform version to install'
+    required: false
+    default: 'latest'
+  backend-config-file:
+    description: 'Path to the backend .conf file'
+    required: false
+    default: 'backend.conf'
+  working-directory:
+    description: 'Directory containing the Terraform files'
+    required: false
+    default: '.'
+  azure-credentials:
+    description: >
+      JSON service principal credential, same shape as azure/login's
+      AZURE_CREDENTIALS secret:
+      {"clientId": "...", "clientSecret": "...", "subscriptionId": "...", "tenantId": "..."}
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+
+    # Parse the single JSON secret into the ARM_* env vars terraform's
+    # azurerm provider/backend expect - no OIDC, plain client secret auth.
+    - name: Set Azure credentials from JSON
+      shell: bash
+      run: |
+        echo "ARM_CLIENT_ID=$(echo '${{ inputs.azure-credentials }}' | jq -r .clientId)" >> "$GITHUB_ENV"
+        echo "ARM_CLIENT_SECRET=$(echo '${{ inputs.azure-credentials }}' | jq -r .clientSecret)" >> "$GITHUB_ENV"
+        echo "ARM_SUBSCRIPTION_ID=$(echo '${{ inputs.azure-credentials }}' | jq -r .subscriptionId)" >> "$GITHUB_ENV"
+        echo "ARM_TENANT_ID=$(echo '${{ inputs.azure-credentials }}' | jq -r .tenantId)" >> "$GITHUB_ENV"
+
+    # Equivalent of TerraformTaskV4@4 command=init with an azurerm backendServiceArm
+    - name: Terraform Init (Azure backend, service principal auth)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: terraform init -backend-config="${{ inputs.backend-config-file }}"

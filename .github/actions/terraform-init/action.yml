@@ -28,10 +28,7 @@ runs:
       with:
         terraform_version: ${{ inputs.terraform-version }}
 
-    # Parse the single JSON secret into the ARM_* env vars the azurerm
-    # provider/backend read automatically. Exported to $GITHUB_ENV so every
-    # later step in the calling job (plan/apply/destroy) also gets them -
-    # this action only needs to be called once per job.
+
     - name: Set Azure credentials from JSON
       shell: bash
       run: |

@@ -31,6 +31,7 @@ variable "default_node_pool" {
     orchestrator_version = string
   })
 }
+
 variable "network_profile" {
   type = object({
     network_plugin      = string
@@ -39,8 +40,8 @@ variable "network_profile" {
     network_plugin_mode = string
   })
 }
+
 variable "identity_type" { type = string }
-# variable "vnet_subnet_id" { type = string }
 variable "enable_workload_identity" { type = bool }
 variable "enable_oidc" { type = bool }
 variable "enable_azure_policy" { type = bool }
@@ -51,7 +52,6 @@ variable "aks_subnet_name" { type = string }
 variable "aks_subnet_address_prefix" { type = list(string) }
 variable "endpoints_subnet_name" { type = string }
 variable "endpoints_subnet_address_prefix" { type = list(string) }
-
 
 variable "system_node_pool" {
   type = any
@@ -76,7 +76,6 @@ variable "subscription_id" {
   type        = string
 }
 
-# variables.tf in the root module
 variable "terraform_principal_id" {
   description = "The object ID of the Terraform identity (e.g., service principal)."
   type        = string

@@ -1,0 +1,132 @@
+name: Terraform AKS Pipeline
+
+# --- Triggers -----------------------------------------------------------
+# - push to ANY branch except prod        -> validate + plan (no apply)
+# - pull_request targeting prod           -> validate + plan (posts plan as PR check;
+#                                             actual merge approval is enforced by the
+#                                             prod branch protection rule, see README notes)
+# - push to prod (i.e. after a PR merges) -> validate + plan + apply (apply gated by
+#                                             the "prod" GitHub Environment's required
+#                                             reviewers)
+# - manual dispatch with destroy=true     -> validate + plan + destroy (also gated by
+#                                             the "prod" GitHub Environment)
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - prod
+  workflow_dispatch:
+    inputs:
+      destroy:
+        description: 'Run terraform destroy against prod instead of apply'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write  # lets the plan job comment on the PR
+
+env:
+  TF_WORKING_DIR: '.'
+  TF_BACKEND_CONFIG: 'backend.conf'
+
+jobs:
+
+  # ------------------------------------------------------------------
+  # Validate — always runs (equivalent of TerraformValidate stage)
+  # ------------------------------------------------------------------
+  validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Terraform Init
+        uses: ./.github/actions/terraform-init
+        with:
+          working-directory: ${{ env.TF_WORKING_DIR }}
+          backend-config-file: ${{ env.TF_BACKEND_CONFIG }}
+          azure-credentials: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+  # ------------------------------------------------------------------
+  # Plan — runs on every branch/PR that is NOT the prod branch itself
+  # (equivalent of TerraformPlan stage, minus prod pushes which go
+  # straight through to apply's own plan step)
+  # ------------------------------------------------------------------
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name != 'workflow_dispatch' && github.ref != 'refs/heads/prod'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Terraform Init
+        uses: ./.github/actions/terraform-init
+        with:
+          working-directory: ${{ env.TF_WORKING_DIR }}
+          backend-config-file: ${{ env.TF_BACKEND_CONFIG }}
+          azure-credentials: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -out=tfplan -input=false
+
+  # ------------------------------------------------------------------
+  # Apply — only on pushes to the prod branch (i.e. after a PR merges).
+  # The "prod" GitHub Environment must have "Required reviewers"
+  # configured so this job pauses for manual approval before it runs.
+  # ------------------------------------------------------------------
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/prod' && github.event.inputs.destroy != 'true'
+    environment: prod   # <-- approval gate lives here (Settings > Environments > prod)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Terraform Init
+        uses: ./.github/actions/terraform-init
+        with:
+          working-directory: ${{ env.TF_WORKING_DIR }}
+          backend-config-file: ${{ env.TF_BACKEND_CONFIG }}
+          azure-credentials: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -out=tfplan -input=false
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false tfplan
+
+  # ------------------------------------------------------------------
+  # Destroy — manual only (workflow_dispatch with destroy=true), and
+  # only against prod. Also gated by the "prod" environment reviewers.
+  # ------------------------------------------------------------------
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.destroy == 'true' && github.ref == 'refs/heads/prod'
+    environment: prod   # <-- second, independent approval gate for destroy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Terraform Init
+        uses: ./.github/actions/terraform-init
+        with:
+          working-directory: ${{ env.TF_WORKING_DIR }}
+          backend-config-file: ${{ env.TF_BACKEND_CONFIG }}
+          azure-credentials: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Destroy
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform destroy -auto-approve -input=false

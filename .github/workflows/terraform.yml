@@ -1,15 +1,50 @@
 name: Terraform AKS Pipeline
 
-# --- Triggers -----------------------------------------------------------
-# - push to ANY branch except prod        -> validate + plan (no apply)
-# - pull_request targeting prod           -> validate + plan (posts plan as PR check;
-#                                             actual merge approval is enforced by the
-#                                             prod branch protection rule, see README notes)
-# - push to prod (i.e. after a PR merges) -> validate + plan + apply (apply gated by
-#                                             the "prod" GitHub Environment's required
-#                                             reviewers)
-# - manual dispatch with destroy=true     -> validate + plan + destroy (also gated by
-#                                             the "prod" GitHub Environment)
+# ============================================================================
+# BEHAVIOUR
+# ----------------------------------------------------------------------------
+# - Any push to a branch other than `prod`, or a PR into `prod`
+#     -> "plan" job only: fmt check, init, validate, plan. Nothing is ever
+#        applied or destroyed on these branches.
+#
+# - Push to `prod` (i.e. right after a PR merges), or a manual run with
+#   action=apply, from `prod`
+#     -> "apply" job: init, validate, plan, apply
+#        Gated by the "prod" GitHub Environment's required reviewers.
+#
+# - Manual run with action=destroy, from `prod`
+#     -> "destroy" job: init, validate, plan (destroy mode), destroy
+#        Also gated by the "prod" GitHub Environment's required reviewers.
+#
+# apply/destroy are hard-locked to the `prod` branch (checked explicitly,
+# not just inferred from the trigger) so no other branch can ever reach them,
+# even via a manually dispatched run.
+#
+# REQUIRED REPO SETUP
+# ----------------------------------------------------------------------------
+# 1. Secret AZURE_CREDENTIALS (Settings > Secrets and variables > Actions):
+#      {"clientId": "...", "clientSecret": "...", "subscriptionId": "...", "tenantId": "..."}
+#    This service principal needs Contributor on the target resource group
+#    AND "User Access Administrator" (or Owner) on any scope where this
+#    config creates azurerm_role_assignment resources (e.g. the ACR
+#    resource) - Contributor alone cannot write role assignments. This is a
+#    one-time Azure IAM grant, done once outside of Terraform/the pipeline -
+#    no identity can grant itself permissions it doesn't already have, so
+#    this can't be automated away in code:
+#      az role assignment create \
+#        --assignee "<client-id-from-AZURE_CREDENTIALS>" \
+#        --role "User Access Administrator" \
+#        --scope "/subscriptions/<sub-id>/resourceGroups/<rg-name>"
+#
+# 2. Environment "prod" (Settings > Environments):
+#    Add required reviewers here. This is what makes both apply and destroy
+#    pause for manual approval before running.
+#
+# 3. Branch protection rule on `prod` (Settings > Branches):
+#    Require a pull request before merging + require approvals. This gates
+#    merging INTO prod, separate from the deploy-time approval above.
+# ============================================================================
+
 on:
   push:
     branches:

@@ -56,7 +56,16 @@ module "aks" {
   depends_on = [module.resource_group, module.acr]
 }
 
-
+# // Assign Owner role to the Terraform identity at the subscription level.
+# // Kept commented intentionally: whichever identity applies this needs
+# // Microsoft.Authorization/roleAssignments/write already - it can't grant
+# // itself that permission via this resource. Use the one-time `az role
+# // assignment create` command in the pipeline README/comments instead.
+# resource "azurerm_role_assignment" "terraform_owner" {
+#   scope                = "/subscriptions/${var.subscription_id}"
+#   role_definition_name = "Owner"
+#   principal_id         = var.terraform_principal_id
+# }
 
 resource "time_sleep" "wait_for_aks_identity" {
   depends_on      = [module.aks]

@@ -1,5 +1,5 @@
 name: 'Terraform Init'
-description: 'Installs Terraform and runs terraform init against the Azure backend using a service principal JSON credential'
+description: 'Installs Terraform, sets Azure service principal credentials from a JSON secret, and runs terraform init against the Azure backend'
 
 inputs:
   terraform-version:
@@ -7,7 +7,7 @@ inputs:
     required: false
     default: 'latest'
   backend-config-file:
-    description: 'Path to the backend .conf file'
+    description: 'Path to the flat key=value backend config file (used with -backend-config)'
     required: false
     default: 'backend.conf'
   working-directory:
@@ -29,18 +29,20 @@ runs:
       with:
         terraform_version: ${{ inputs.terraform-version }}
 
-    # Parse the single JSON secret into the ARM_* env vars terraform's
-    # azurerm provider/backend expect - no OIDC, plain client secret auth.
+    # Parse the single JSON secret into the ARM_* env vars the azurerm
+    # provider/backend read automatically. Exported to $GITHUB_ENV so every
+    # later step in the calling job (plan/apply/destroy) also gets them -
+    # this action only needs to be called once per job.
     - name: Set Azure credentials from JSON
       shell: bash
       run: |
-        echo "ARM_CLIENT_ID=$(echo '${{ inputs.azure-credentials }}' | jq -r .clientId)" >> "$GITHUB_ENV"
-        echo "ARM_CLIENT_SECRET=$(echo '${{ inputs.azure-credentials }}' | jq -r .clientSecret)" >> "$GITHUB_ENV"
-        echo "ARM_SUBSCRIPTION_ID=$(echo '${{ inputs.azure-credentials }}' | jq -r .subscriptionId)" >> "$GITHUB_ENV"
-        echo "ARM_TENANT_ID=$(echo '${{ inputs.azure-credentials }}' | jq -r .tenantId)" >> "$GITHUB_ENV"
+        CREDS='${{ inputs.azure-credentials }}'
+        echo "ARM_CLIENT_ID=$(echo "$CREDS" | jq -r .clientId)"             >> "$GITHUB_ENV"
+        echo "ARM_CLIENT_SECRET=$(echo "$CREDS" | jq -r .clientSecret)"     >> "$GITHUB_ENV"
+        echo "ARM_SUBSCRIPTION_ID=$(echo "$CREDS" | jq -r .subscriptionId)" >> "$GITHUB_ENV"
+        echo "ARM_TENANT_ID=$(echo "$CREDS" | jq -r .tenantId)"             >> "$GITHUB_ENV"
 
-    # Equivalent of TerraformTaskV4@4 command=init with an azurerm backendServiceArm
     - name: Terraform Init (Azure backend, service principal auth)
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: terraform init -backend-config="${{ inputs.backend-config-file }}"
+      run: terraform init -input=false -backend-config="${{ inputs.backend-config-file }}"
